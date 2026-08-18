@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.Serialization;
 
 namespace ANDS.RulesEngine;
 
@@ -70,7 +69,7 @@ public sealed class RulesEngine : IRulesEngine
     public RulesEngine(IEnumerable<IRuleActionHandler>? handlers = null, RulesEngineOptions? options = null)
     {
         _options = options ?? new RulesEngineOptions();
-        _handlers = (handlers ?? Array.Empty<IRuleActionHandler>())
+        _handlers = (handlers ?? [])
             .ToDictionary(handler => handler.ActionType, StringComparer.OrdinalIgnoreCase);
     }
 
@@ -81,6 +80,7 @@ public sealed class RulesEngine : IRulesEngine
         var matched = new List<Rule>();
         var executed = new List<ExecutedAction>();
         var errors = new List<RuleError>();
+        var evaluationOptions = new RuleEvaluationOptions { StringCaseSensitive = _options.StringCaseSensitive };
         var stopwatch = Stopwatch.StartNew();
         var context = new FactContext(facts);
         var orderedRules = rules.Where(rule => rule.Enabled).OrderBy(rule => rule.Priority).ThenBy(rule => rule.Id,
@@ -92,8 +92,7 @@ public sealed class RulesEngine : IRulesEngine
             try
             {
                 rule.Validate();
-                if (!ConditionEvaluator.Evaluate(rule.Condition!, context,
-                        new RuleEvaluationOptions { StringCaseSensitive = _options.StringCaseSensitive }))
+                if (!ConditionEvaluator.Evaluate(rule.Condition!, context, evaluationOptions))
                     continue;
 
                 matched.Add(rule);
@@ -133,8 +132,6 @@ public sealed class RulesEngine : IRulesEngine
     }
 }
 
-[Serializable]
-#pragma warning disable SYSLIB0051
 public class UnknownActionException : InvalidOperationException
 {
     public UnknownActionException() { }
@@ -143,14 +140,6 @@ public class UnknownActionException : InvalidOperationException
 
     public UnknownActionException(string? message, Exception? innerException)
         : base(message, innerException) { }
-
-    [Obsolete("Formatter-based serialization is obsolete.", DiagnosticId = "SYSLIB0051")]
-    protected UnknownActionException(SerializationInfo info, StreamingContext context)
-        : base(info, context)
-    {
-        ActionType = info.GetString(nameof(ActionType));
-        RuleId = info.GetString(nameof(RuleId));
-    }
 
     public UnknownActionException(string actionType, string ruleId)
         : base($"No handler registered for action type '{actionType}' on rule '{ruleId}'.")
@@ -161,14 +150,4 @@ public class UnknownActionException : InvalidOperationException
 
     public string? ActionType { get; }
     public string? RuleId { get; }
-
-    [Obsolete("Formatter-based serialization is obsolete.", DiagnosticId = "SYSLIB0051")]
-    public override void GetObjectData(SerializationInfo info, StreamingContext context)
-    {
-        ArgumentNullException.ThrowIfNull(info);
-        info.AddValue(nameof(ActionType), ActionType);
-        info.AddValue(nameof(RuleId), RuleId);
-        base.GetObjectData(info, context);
-    }
 }
-#pragma warning restore SYSLIB0051
