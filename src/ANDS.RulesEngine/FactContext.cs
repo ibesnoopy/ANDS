@@ -23,7 +23,9 @@ public sealed class FactContext : IFactContext
             return false;
 
         object? current = _root;
-        foreach (var segment in ParsePath(path))
+        if (!TryParsePath(path, out var segments))
+            return false;
+        foreach (var segment in segments)
         {
             if (!TryGetSegment(current, segment, out current))
                 return false;
@@ -33,16 +35,40 @@ public sealed class FactContext : IFactContext
         return true;
     }
 
-    private static IEnumerable<string> ParsePath(string path)
+    private static bool TryParsePath(string path, out IReadOnlyList<string> segments)
     {
+        var parsed = new List<string>();
         var segment = new System.Text.StringBuilder();
+        var inBracket = false;
         foreach (var character in path)
         {
-            if (character == '.')
+            if (inBracket)
+            {
+                if (character == '[')
+                {
+                    segments = Array.Empty<string>();
+                    return false;
+                }
+                if (character == ']')
+                {
+                    var bracketValue = segment.ToString().Trim('\'', '"');
+                    if (bracketValue.Length == 0)
+                    {
+                        segments = Array.Empty<string>();
+                        return false;
+                    }
+                    parsed.Add(bracketValue);
+                    segment.Clear();
+                    inBracket = false;
+                }
+                else
+                    segment.Append(character);
+            }
+            else if (character == '.')
             {
                 if (segment.Length > 0)
                 {
-                    yield return segment.ToString();
+                    parsed.Add(segment.ToString());
                     segment.Clear();
                 }
             }
@@ -50,25 +76,28 @@ public sealed class FactContext : IFactContext
             {
                 if (segment.Length > 0)
                 {
-                    yield return segment.ToString();
+                    parsed.Add(segment.ToString());
                     segment.Clear();
                 }
+                inBracket = true;
             }
             else if (character == ']')
             {
-                if (segment.Length > 0)
-                {
-                    yield return segment.ToString().Trim('\'', '"');
-                    segment.Clear();
-                }
+                segments = Array.Empty<string>();
+                return false;
             }
             else
-            {
                 segment.Append(character);
-            }
+        }
+        if (inBracket)
+        {
+            segments = Array.Empty<string>();
+            return false;
         }
         if (segment.Length > 0)
-            yield return segment.ToString();
+            parsed.Add(segment.ToString());
+        segments = parsed;
+        return parsed.Count > 0;
     }
 
     private static bool TryGetSegment(object? source, string segment, out object? value)
@@ -79,10 +108,17 @@ public sealed class FactContext : IFactContext
 
         if (source is JsonElement json)
         {
-            if (json.ValueKind != JsonValueKind.Object || !json.TryGetProperty(segment, out var element))
+            if (json.ValueKind != JsonValueKind.Object)
                 return false;
-            value = element;
-            return true;
+            foreach (var jsonProperty in json.EnumerateObject())
+            {
+                if (string.Equals(jsonProperty.Name, segment, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = jsonProperty.Value;
+                    return true;
+                }
+            }
+            return false;
         }
 
         if (source is IDictionary<string, object?> genericDictionary)
