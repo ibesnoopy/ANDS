@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ANDS.RulesEngine;
 
 namespace ANDS.RulesEngine.Tests;
@@ -133,6 +134,145 @@ public sealed class ConditionEvaluationTests
         var result = await new RulesEngine().EvaluateAsync(new[] { rule }, new { value = "abc" });
         Assert.Single(result.Errors);
         Assert.Contains("string expected", result.Errors[0].Message);
+    }
+
+    [Theory]
+    [InlineData("b", true)]
+    [InlineData("c", false)]
+    public async Task Contains_supports_collection_actual_values(string expected, bool shouldMatch)
+    {
+        var rule = TestSupport.RuleFor(TestSupport.Comparison("value", ComparisonOperator.Contains, expected));
+        var result = await new RulesEngine().EvaluateAsync(new[] { rule }, new { value = new[] { "a", "b" } });
+
+        Assert.Equal(shouldMatch, result.MatchedRules.Count == 1);
+        Assert.Empty(result.Errors);
+    }
+
+    [Theory]
+    [InlineData(ComparisonOperator.StartsWith)]
+    [InlineData(ComparisonOperator.EndsWith)]
+    [InlineData(ComparisonOperator.Matches)]
+    public async Task String_operators_reject_wrong_expected_types(ComparisonOperator op)
+    {
+        var rule = TestSupport.RuleFor(TestSupport.Comparison("value", op, 42));
+        var result = await new RulesEngine().EvaluateAsync(new[] { rule }, new { value = "abc" });
+
+        Assert.Single(result.Errors);
+    }
+
+    [Fact]
+    public async Task JsonElement_expected_values_are_unwrapped_for_each_value_kind()
+    {
+        using var document = JsonDocument.Parse(
+            """{"text":"abc","boolean":true,"integer":42,"decimal":79228162514264337593543950335,"array":[1,2],"object":{"x":1}}""");
+        var root = document.RootElement;
+        var rules = new[]
+        {
+            TestSupport.RuleFor(TestSupport.Comparison("null", ComparisonOperator.Equal,
+                default(JsonElement)), "null", 0),
+            TestSupport.RuleFor(TestSupport.Comparison("text", ComparisonOperator.Equal,
+                root.GetProperty("text")), "text", 1),
+            TestSupport.RuleFor(TestSupport.Comparison("boolean", ComparisonOperator.Equal,
+                root.GetProperty("boolean")), "boolean", 2),
+            TestSupport.RuleFor(TestSupport.Comparison("integer", ComparisonOperator.Equal,
+                root.GetProperty("integer")), "integer", 3),
+            TestSupport.RuleFor(TestSupport.Comparison("decimal", ComparisonOperator.Equal,
+                root.GetProperty("decimal")), "decimal", 4),
+            TestSupport.RuleFor(TestSupport.Comparison("number", ComparisonOperator.In,
+                root.GetProperty("array")), "array", 5),
+            TestSupport.RuleFor(TestSupport.Comparison("object", ComparisonOperator.Equal,
+                root.GetProperty("object")), "object", 6)
+        };
+        var facts = new Dictionary<string, object?>
+        {
+            ["null"] = null,
+            ["text"] = "abc",
+            ["boolean"] = true,
+            ["integer"] = 42,
+            ["decimal"] = decimal.MaxValue,
+            ["number"] = 2,
+            ["object"] = new Dictionary<string, object?> { ["x"] = 1 }
+        };
+
+        var result = await new RulesEngine().EvaluateAsync(rules, facts);
+
+        Assert.Equal(new[] { "null", "text", "boolean", "integer", "decimal", "array" },
+            result.MatchedRules.Select(rule => rule.Id));
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public async Task Failed_numeric_boolean_and_date_coercion_returns_false()
+    {
+        var rules = new[]
+        {
+            TestSupport.RuleFor(TestSupport.Comparison("number", ComparisonOperator.Equal, "not a number"), "number"),
+            TestSupport.RuleFor(TestSupport.Comparison("overflow", ComparisonOperator.Equal, 0), "overflow"),
+            TestSupport.RuleFor(TestSupport.Comparison("boolean", ComparisonOperator.Equal, "not a boolean"), "boolean"),
+            TestSupport.RuleFor(TestSupport.Comparison("date", ComparisonOperator.Equal, "not a date"), "date"),
+            TestSupport.RuleFor(TestSupport.Comparison("validDate", ComparisonOperator.Equal,
+                new DateTime(2024, 1, 1)), "valid-date"),
+            TestSupport.RuleFor(TestSupport.Comparison("null", ComparisonOperator.GreaterThan, 1), "null")
+        };
+        var result = await new RulesEngine(options: new RulesEngineOptions
+        { RuleErrorBehavior = RuleErrorBehavior.Continue }).EvaluateAsync(rules, new Dictionary<string, object?>
+        {
+            ["number"] = 1,
+            ["overflow"] = double.MaxValue,
+            ["boolean"] = true,
+            ["date"] = new DateTime(2024, 1, 1),
+            ["validDate"] = new DateTime(2024, 1, 1),
+            ["null"] = null
+        });
+
+        Assert.Equal(new[] { "valid-date" }, result.MatchedRules.Select(rule => rule.Id));
+        Assert.Single(result.Errors);
+    }
+
+    [Fact]
+    public async Task Ordering_with_present_null_value_is_a_rule_error()
+    {
+        var rule = TestSupport.RuleFor(TestSupport.Comparison("value", ComparisonOperator.GreaterThan, 1));
+
+        var result = await new RulesEngine().EvaluateAsync(new[] { rule }, new { value = (object?)null });
+
+        Assert.Single(result.Errors);
+    }
+
+    [Fact]
+    public async Task Invalid_operator_value_is_a_rule_error()
+    {
+        var rule = TestSupport.RuleFor(TestSupport.Comparison("value", (ComparisonOperator)999, 1));
+
+        var result = await new RulesEngine().EvaluateAsync(new[] { rule }, new { value = 1 });
+
+        Assert.Single(result.Errors);
+        Assert.Contains("Unsupported operator", result.Errors[0].Message);
+    }
+
+    [Fact]
+    public async Task String_operators_honor_case_sensitive_option()
+    {
+        var rule = TestSupport.RuleFor(TestSupport.Comparison("value", ComparisonOperator.StartsWith, "he"));
+
+        var result = await new RulesEngine(options: new RulesEngineOptions { StringCaseSensitive = true })
+            .EvaluateAsync(new[] { rule }, new { value = "Hello" });
+
+        Assert.Empty(result.MatchedRules);
+        Assert.Empty(result.Errors);
+    }
+
+    [Theory]
+    [InlineData(ComparisonOperator.IsNull, "missing")]
+    [InlineData(ComparisonOperator.IsNotNull, "missing")]
+    public async Task Null_operators_return_false_for_missing_paths(ComparisonOperator op, string field)
+    {
+        var rule = TestSupport.RuleFor(TestSupport.Comparison(field, op));
+
+        var result = await new RulesEngine().EvaluateAsync(new[] { rule }, new { value = "present" });
+
+        Assert.Empty(result.MatchedRules);
+        Assert.Empty(result.Errors);
     }
 
     [Fact]

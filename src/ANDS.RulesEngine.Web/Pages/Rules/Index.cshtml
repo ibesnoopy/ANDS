@@ -1,0 +1,71 @@
+@page "/Rules"
+@model ANDS.RulesEngine.Web.Pages.Rules.IndexModel
+@{
+    ViewData["Title"] = "Rules";
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Rules</h1>
+    <a asp-page="/Rules/Edit" class="btn btn-primary">New rule</a>
+</div>
+
+@if (Model.StatusMessage is not null)
+{
+    <div class="alert alert-success">@Model.StatusMessage</div>
+}
+
+<table class="table table-striped align-middle">
+    <thead>
+        <tr>
+            <th>Priority</th>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Enabled</th>
+            <th>Last updated</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var rule in Model.Rules)
+        {
+            <tr>
+                <td>@rule.Priority</td>
+                <td><code>@rule.Id</code></td>
+                <td>@rule.Name</td>
+                <td>
+                    <form method="post" asp-page-handler="Toggle" asp-route-id="@rule.Id" class="d-inline">
+                        <button type="submit" class="btn btn-sm @(rule.Enabled ? "btn-success" : "btn-outline-secondary")">
+                            @(rule.Enabled ? "Enabled" : "Disabled")
+                        </button>
+                    </form>
+                </td>
+                <td>
+                    @rule.UpdatedAt.ToString("u")
+                    @if (rule.UpdatedBy is not null)
+                    {
+                        <span class="text-muted">by @rule.UpdatedBy</span>
+                    }
+                </td>
+                <td class="text-end">
+                    <a asp-page="/Rules/Edit" asp-route-id="@rule.Id" class="btn btn-sm btn-outline-primary">Edit</a>
+                    <form method="post" asp-page-handler="Delete" asp-route-id="@rule.Id" class="d-inline"
+                          onsubmit="return confirm('Delete rule @rule.Id?');">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                    </form>
+                </td>
+            </tr>
+        }
+        @if (Model.Rules.Count == 0)
+        {
+            <tr><td colspan="6" class="text-muted">No rules yet.</td></tr>
+        }
+    </tbody>
+</table>
+
+<h2 class="h5 mt-4">Recent changes</h2>
+<ul class="list-unstyled">
+    @foreach (var audit in Model.Audit)
+    {
+        <li><code>@audit.RuleId</code> @audit.Action by @audit.ChangedBy at @audit.ChangedAt.ToString("u")</li>
+    }
+</ul>

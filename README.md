@@ -60,7 +60,13 @@ For a present value, a type mismatch is an evaluation error rather than a
 silent non-match. This applies to ordering, `contains`, `startsWith`,
 `endsWith`, `matches`, and invalid `in`/`notIn` operands. Configure
 `RuleErrorBehavior.Continue` to record the error and evaluate later rules;
-`Abort` stops evaluation after the first rule error.
+`Abort` stops evaluation after the first rule error and sets
+`RuleEvaluationResult.Aborted`.
+
+`matches` patterns run with `RulesEngineOptions.RegexTimeout` (one second by
+default); an invalid pattern or a pattern that exceeds the timeout is reported
+as a rule error naming the pattern rather than escaping as a raw regex
+exception.
 
 ## Usage
 
@@ -75,7 +81,15 @@ var engine = new RulesEngine(handlers, new RulesEngineOptions
 
 var rules = await new JsonFileRuleSource("rules.json").LoadRulesAsync();
 var result = await engine.EvaluateAsync(rules, facts);
+result.ThrowIfErrors();
 ```
+
+Rule errors are collected in `RuleEvaluationResult.Errors` instead of being
+thrown, so callers that must not ignore them can check `HasErrors` or call
+`ThrowIfErrors()`, which throws a `RuleEvaluationException` carrying every
+recorded error. An exception thrown by an action handler is recorded as a
+`RuleActionException` that names the rule, action type, and action index and
+keeps the handler exception as its inner exception.
 
 Implement `IRuleActionHandler` to register application behavior:
 
@@ -138,10 +152,44 @@ var source = new SqlRuleSource(new SqlRuleSourceOptions
 var rules = await source.LoadRulesAsync();
 ```
 
+Load failures are actionable: database errors are wrapped in an
+`InvalidDataException` naming the schema and table, and a row that cannot be
+mapped (missing column, null `Priority`/`Enabled`, invalid `Definition` JSON)
+throws a `RuleValidationException` naming the row, rule, and column while
+keeping the underlying exception.
+
 Schema, table, and column identifiers are validated and bracket-quoted before
 being placed in SQL. `IDbConnectionFactory` can be injected for tests or
 application-specific connection management; no connection string is embedded
 in the library.
+
+## Rules administration site
+
+`src/ANDS.RulesEngine.Web` is an ASP.NET Core Razor Pages site for editing the
+rules that `SqlRuleSource` loads. Every page except sign-in requires an
+authenticated user (ASP.NET Core Identity, cookie sign-in, SQL Server store).
+Rules are written to the `dbo.Rules` table with the columns `SqlRuleSource`
+expects (`Id`, `Name`, `Description`, `Priority`, `Enabled`, `Definition`), so
+the engine reads the site's output without any change. Definitions are parsed
+and validated with `Rule.Validate()` before they are saved, and each create,
+update, and delete is recorded in `dbo.RuleAudits` with the signed-in user.
+
+Configuration (no secrets are committed; supply them via environment variables
+or user secrets):
+
+```bash
+export ConnectionStrings__RulesDatabase="Server=...;Database=Ands;..."
+# Optional: creates this account on startup when it does not exist yet.
+export AdminUser__Email="admin@example.com"
+export AdminUser__Password="a-long-password"
+dotnet run --project src/ANDS.RulesEngine.Web
+```
+
+Migrations are applied on startup. To add one:
+
+```bash
+dotnet ef migrations add <Name> --project src/ANDS.RulesEngine.Web --output-dir Data/Migrations
+```
 
 ## Build and test
 

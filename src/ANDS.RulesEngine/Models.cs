@@ -93,7 +93,12 @@ public sealed record Rule
 public sealed class RuleValidationException : Exception
 {
     public RuleValidationException(string? ruleId, string message)
-        : base(ruleId is null or "" ? message : $"Rule '{ruleId}': {message}")
+        : this(ruleId, message, null)
+    {
+    }
+
+    public RuleValidationException(string? ruleId, string message, Exception? innerException)
+        : base(ruleId is null or "" ? message : $"Rule '{ruleId}': {message}", innerException)
     {
         RuleId = ruleId;
     }
@@ -154,11 +159,13 @@ internal sealed class ConditionJsonConverter : JsonConverter<Condition>
             var group = GetString(root, "group") ?? GetString(root, "operator");
             if (!Enum.TryParse<ConditionGroupType>(group, true, out var groupType))
                 throw new JsonException($"Unknown condition group '{group}'.");
-            var children = root.TryGetProperty("conditions", out var conditions)
-                ? JsonSerializer.Deserialize<List<Condition>>(conditions.GetRawText(), options)
-                : null;
-            if (children is null)
+            if (!root.TryGetProperty("conditions", out var conditions))
                 throw new JsonException("Condition group requires a 'conditions' array.");
+            if (conditions.ValueKind != JsonValueKind.Array)
+                throw new JsonException(
+                    $"Condition group 'conditions' must be a JSON array but was '{conditions.ValueKind.ToString().ToLowerInvariant()}'.");
+            var children = JsonSerializer.Deserialize<List<Condition>>(conditions.GetRawText(), options)
+                           ?? throw new JsonException("Condition group requires a 'conditions' array.");
             return new ConditionGroup { Group = groupType, Conditions = children };
         }
 
