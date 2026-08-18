@@ -1,0 +1,14 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+## Test results
+TestResults/
+coverage/
+
+## IDE
+.idea/
+*.DotSettings.user
