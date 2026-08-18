@@ -38,13 +38,21 @@ public sealed class JsonFileRuleSource : IRuleSource
                     : throw new JsonException("Expected a JSON array or an object containing a 'rules' array.");
             var rules = JsonSerializer.Deserialize<List<Rule>>(rulesElement.GetRawText(), _serializerOptions)
                         ?? throw new JsonException("The rules array was null.");
-            foreach (var rule in rules)
-                rule.Validate();
+            for (var index = 0; index < rules.Count; index++)
+            {
+                if (rules[index] is null)
+                    throw new InvalidDataException($"Rule at rules[{index}] in JSON file '{_filePath}' is null.");
+                try
+                {
+                    rules[index].Validate();
+                }
+                catch (RuleValidationException exception)
+                {
+                    throw new InvalidDataException(
+                        $"Invalid rule at rules[{index}] in JSON file '{_filePath}': {exception.Message}", exception);
+                }
+            }
             return rules;
-        }
-        catch (RuleValidationException exception)
-        {
-            throw new InvalidDataException($"Invalid rule in JSON file '{_filePath}': {exception.Message}", exception);
         }
         catch (JsonException exception)
         {
@@ -54,6 +62,11 @@ public sealed class JsonFileRuleSource : IRuleSource
         catch (IOException exception)
         {
             throw new InvalidDataException($"Unable to read rules file '{_filePath}': {exception.Message}", exception);
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            throw new InvalidDataException(
+                $"Access to rules file '{_filePath}' was denied: {exception.Message}", exception);
         }
     }
 }
@@ -142,15 +155,34 @@ public sealed class SqlRuleSource : IRuleSource
 
     public async Task<IReadOnlyList<Rule>> LoadRulesAsync(CancellationToken cancellationToken = default)
     {
-        await using var connection = _connectionFactory.CreateConnection(_options.ConnectionString);
-        await connection.OpenAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = SqlRuleQueryBuilder.BuildSelect(_options);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        var rules = new List<Rule>();
-        while (await reader.ReadAsync(cancellationToken))
-            rules.Add(SqlRuleMapper.Map(reader, _options, _serializerOptions));
-        return rules;
+        try
+        {
+            await using var connection = _connectionFactory.CreateConnection(_options.ConnectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = SqlRuleQueryBuilder.BuildSelect(_options);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            var rules = new List<Rule>();
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                try
+                {
+                    rules.Add(SqlRuleMapper.Map(reader, _options, _serializerOptions));
+                }
+                catch (RuleValidationException exception)
+                {
+                    throw new RuleValidationException(exception.RuleId,
+                        $"Row {rules.Count + 1} of {_options.Schema}.{_options.Table} is invalid: {exception.Message}",
+                        exception);
+                }
+            }
+            return rules;
+        }
+        catch (DbException exception)
+        {
+            throw new InvalidDataException(
+                $"Unable to load rules from {_options.Schema}.{_options.Table}: {exception.Message}", exception);
+        }
     }
 }
 
@@ -160,10 +192,11 @@ public static class SqlRuleMapper
         JsonSerializerOptions? serializerOptions = null)
     {
         ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(options);
         var jsonOptions = serializerOptions ?? RuleJsonSerializer.CreateOptions();
         var id = ReadRequiredString(reader, options.IdColumn, "id");
         var name = ReadRequiredString(reader, options.NameColumn, "name");
-        var definition = reader[options.DefinitionColumn];
+        var definition = ReadColumn(reader, options.DefinitionColumn, id);
         if (definition is null or DBNull ||
             string.IsNullOrWhiteSpace(Convert.ToString(definition, CultureInfo.InvariantCulture)))
             throw new RuleValidationException(id, $"Definition column '{options.DefinitionColumn}' is null or empty.");
@@ -178,18 +211,19 @@ public static class SqlRuleMapper
         catch (JsonException exception)
         {
             throw new RuleValidationException(id,
-                $"Definition column '{options.DefinitionColumn}' is invalid JSON: {exception.Message}");
+                $"Definition column '{options.DefinitionColumn}' is invalid JSON: {exception.Message}", exception);
         }
 
+        var description = ReadColumn(reader, options.DescriptionColumn, id);
         var rule = new Rule
         {
             Id = id,
             Name = name,
-            Description = reader[options.DescriptionColumn] is DBNull
+            Description = description is null or DBNull
                 ? null
-                : Convert.ToString(reader[options.DescriptionColumn], CultureInfo.InvariantCulture),
-            Priority = Convert.ToInt32(reader[options.PriorityColumn], CultureInfo.InvariantCulture),
-            Enabled = Convert.ToBoolean(reader[options.EnabledColumn], CultureInfo.InvariantCulture),
+                : Convert.ToString(description, CultureInfo.InvariantCulture),
+            Priority = ReadValue<int>(reader, options.PriorityColumn, id, "an integer"),
+            Enabled = ReadValue<bool>(reader, options.EnabledColumn, id, "a boolean"),
             Condition = ruleDefinition.Condition,
             Actions = ruleDefinition.Actions ?? Array.Empty<RuleAction>()
         };
@@ -199,11 +233,41 @@ public static class SqlRuleMapper
 
     private static string ReadRequiredString(DbDataReader reader, string column, string label)
     {
-        var value = reader[column];
+        var value = ReadColumn(reader, column, null);
         if (value is null or DBNull ||
             string.IsNullOrWhiteSpace(Convert.ToString(value, CultureInfo.InvariantCulture)))
             throw new RuleValidationException(null, $"The {label} column '{column}' is null or empty.");
         return Convert.ToString(value, CultureInfo.InvariantCulture)!;
+    }
+
+    private static object? ReadColumn(DbDataReader reader, string column, string? ruleId)
+    {
+        try
+        {
+            return reader[column];
+        }
+        catch (Exception exception) when (exception is IndexOutOfRangeException or ArgumentException)
+        {
+            throw new RuleValidationException(ruleId,
+                $"Column '{column}' was not found in the rules query result.", exception);
+        }
+    }
+
+    private static T ReadValue<T>(DbDataReader reader, string column, string ruleId, string expected)
+        where T : struct
+    {
+        var value = ReadColumn(reader, column, ruleId);
+        if (value is null or DBNull)
+            throw new RuleValidationException(ruleId, $"Column '{column}' is null but requires {expected}.");
+        try
+        {
+            return (T)Convert.ChangeType(value, typeof(T), CultureInfo.InvariantCulture);
+        }
+        catch (Exception exception) when (exception is InvalidCastException or FormatException or OverflowException)
+        {
+            throw new RuleValidationException(ruleId,
+                $"Column '{column}' value '{value}' could not be read as {expected}.", exception);
+        }
     }
 }
 

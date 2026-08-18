@@ -8,6 +8,7 @@ namespace ANDS.RulesEngine;
 public sealed class RuleEvaluationOptions
 {
     public bool StringCaseSensitive { get; init; }
+    public TimeSpan RegexTimeout { get; init; } = TimeSpan.FromSeconds(1);
 }
 
 internal static class ConditionEvaluator
@@ -47,6 +48,19 @@ internal static class ConditionEvaluator
             return false;
 
         var expected = UnwrapJsonElement(condition.Value);
+        try
+        {
+            return Apply(op, actual, expected, options);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new InvalidOperationException(
+                $"Condition on field '{condition.Field}' using operator '{op}' failed: {exception.Message}", exception);
+        }
+    }
+
+    private static bool Apply(ComparisonOperator op, object? actual, object? expected, RuleEvaluationOptions options)
+    {
         return op switch
         {
             ComparisonOperator.Equal => AreEqual(actual, expected, options),
@@ -69,9 +83,8 @@ internal static class ConditionEvaluator
     {
         if (actual is null || expected is null)
             return actual is null && expected is null;
-        if (IsNumericType(actual) && TryGetDecimal(actual, out var actualNumber) &&
-            TryGetDecimal(expected, out var expectedNumber))
-            return actualNumber == expectedNumber;
+        if (IsNumericType(actual) && TryCompareNumeric(actual, expected, out var numericComparison))
+            return numericComparison == 0;
         if (actual is bool actualBoolean && TryGetBoolean(expected, out var expectedBoolean))
             return actualBoolean == expectedBoolean;
         if (actual is DateTime actualDate && TryGetDateTime(expected, out var expectedDate))
@@ -86,9 +99,8 @@ internal static class ConditionEvaluator
     {
         if (actual is null || expected is null)
             throw new InvalidOperationException("Ordering comparisons require non-null values.");
-        if (IsNumericType(actual) && TryGetDecimal(actual, out var actualNumber) &&
-            TryGetDecimal(expected, out var expectedNumber))
-            return actualNumber.CompareTo(expectedNumber);
+        if (IsNumericType(actual) && TryCompareNumeric(actual, expected, out var numericComparison))
+            return numericComparison;
         if (actual is DateTime actualDate && TryGetDateTime(expected, out var expectedDate))
             return actualDate.CompareTo(expectedDate);
         if (actual is string actualString && expected is string expectedString)
@@ -140,7 +152,20 @@ internal static class ConditionEvaluator
         if (actual is not string actualString || expected is not string pattern)
             throw new InvalidOperationException("Matches requires string actual and pattern values.");
         var regexOptions = options.StringCaseSensitive ? RegexOptions.CultureInvariant : RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
-        return Regex.IsMatch(actualString, pattern, regexOptions);
+        try
+        {
+            return Regex.IsMatch(actualString, pattern, regexOptions, options.RegexTimeout);
+        }
+        catch (ArgumentException exception)
+        {
+            throw new InvalidOperationException(
+                $"Matches pattern '{pattern}' is not a valid regular expression: {exception.Message}", exception);
+        }
+        catch (RegexMatchTimeoutException exception)
+        {
+            throw new InvalidOperationException(
+                $"Matches pattern '{pattern}' did not complete within {options.RegexTimeout}.", exception);
+        }
     }
 
     private static object? UnwrapJsonElement(object? value)
@@ -159,6 +184,36 @@ internal static class ConditionEvaluator
                 StringComparer.OrdinalIgnoreCase),
             _ => element.GetRawText()
         };
+    }
+
+    private static bool TryCompareNumeric(object actual, object expected, out int comparison)
+    {
+        if (TryGetDecimal(actual, out var actualNumber) && TryGetDecimal(expected, out var expectedNumber))
+        {
+            comparison = actualNumber.CompareTo(expectedNumber);
+            return true;
+        }
+        if (TryGetDouble(actual, out var actualDouble) && TryGetDouble(expected, out var expectedDouble))
+        {
+            comparison = actualDouble.CompareTo(expectedDouble);
+            return true;
+        }
+        comparison = 0;
+        return false;
+    }
+
+    private static bool TryGetDouble(object value, out double result)
+    {
+        switch (value)
+        {
+            case byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal:
+                result = Convert.ToDouble(value, CultureInfo.InvariantCulture);
+                return true;
+            case string text when double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out result):
+                return true;
+        }
+        result = default;
+        return false;
     }
 
     private static bool TryGetDecimal(object value, out decimal result)

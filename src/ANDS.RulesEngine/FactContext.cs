@@ -152,11 +152,10 @@ public sealed class FactContext : IFactContext
             return true;
         }
 
-        var property = source.GetType().GetProperty(segment,
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.IgnoreCase);
+        var property = FindProperty(source.GetType(), segment);
         if (property is not null && property.GetIndexParameters().Length == 0)
         {
-            value = property.GetValue(source);
+            value = ReadMember(() => property.GetValue(source), source, segment);
             return true;
         }
 
@@ -164,10 +163,38 @@ public sealed class FactContext : IFactContext
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.IgnoreCase);
         if (field is not null)
         {
-            value = field.GetValue(source);
+            value = ReadMember(() => field.GetValue(source), source, segment);
             return true;
         }
 
         return false;
+    }
+
+    private static PropertyInfo? FindProperty(Type type, string segment)
+    {
+        try
+        {
+            return type.GetProperty(segment, BindingFlags.Instance | BindingFlags.Public | BindingFlags.IgnoreCase);
+        }
+        catch (AmbiguousMatchException)
+        {
+            return type.GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                .FirstOrDefault(candidate => string.Equals(candidate.Name, segment, StringComparison.Ordinal));
+        }
+    }
+
+    private static object? ReadMember(Func<object?> read, object source, string segment)
+    {
+        try
+        {
+            return read();
+        }
+        catch (TargetInvocationException exception)
+        {
+            throw new InvalidOperationException(
+                $"Reading fact '{segment}' from type '{source.GetType().Name}' threw " +
+                $"{exception.InnerException?.GetType().Name ?? nameof(Exception)}: " +
+                $"{exception.InnerException?.Message ?? exception.Message}", exception.InnerException ?? exception);
+        }
     }
 }
