@@ -163,6 +163,34 @@ being placed in SQL. `IDbConnectionFactory` can be injected for tests or
 application-specific connection management; no connection string is embedded
 in the library.
 
+## Rules administration site
+
+`src/ANDS.RulesEngine.Web` is an ASP.NET Core Razor Pages site for editing the
+rules that `SqlRuleSource` loads. Every page except sign-in requires an
+authenticated user (ASP.NET Core Identity, cookie sign-in, SQL Server store).
+Rules are written to the `dbo.Rules` table with the columns `SqlRuleSource`
+expects (`Id`, `Name`, `Description`, `Priority`, `Enabled`, `Definition`), so
+the engine reads the site's output without any change. Definitions are parsed
+and validated with `Rule.Validate()` before they are saved, and each create,
+update, and delete is recorded in `dbo.RuleAudits` with the signed-in user.
+
+Configuration (no secrets are committed; supply them via environment variables
+or user secrets):
+
+```bash
+export ConnectionStrings__RulesDatabase="Server=...;Database=Ands;..."
+# Optional: creates this account on startup when it does not exist yet.
+export AdminUser__Email="admin@example.com"
+export AdminUser__Password="a-long-password"
+dotnet run --project src/ANDS.RulesEngine.Web
+```
+
+Migrations are applied on startup. To add one:
+
+```bash
+dotnet ef migrations add <Name> --project src/ANDS.RulesEngine.Web --output-dir Data/Migrations
+```
+
 ## Build and test
 
 ```bash
