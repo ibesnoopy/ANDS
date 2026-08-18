@@ -16,18 +16,17 @@ internal static class TestSupport
             Name = id,
             Priority = priority,
             Condition = condition,
-            Actions = actions ?? Array.Empty<RuleAction>()
+            Actions = actions ?? []
         };
 
     public static ComparisonCondition Comparison(string field, ComparisonOperator op, object? value = null) =>
         new() { Field = field, Operator = op, Value = value };
 }
 
-internal sealed class RecordingHandler : IRuleActionHandler
+internal sealed class RecordingHandler(string actionType) : IRuleActionHandler
 {
-    public RecordingHandler(string actionType) => ActionType = actionType;
-    public string ActionType { get; }
-    public List<RuleAction> Actions { get; } = new();
+    public string ActionType { get; } = actionType;
+    public List<RuleAction> Actions { get; } = [];
 
     public Task HandleAsync(RuleAction action, RuleActionContext context, CancellationToken cancellationToken)
     {
@@ -37,15 +36,10 @@ internal sealed class RecordingHandler : IRuleActionHandler
     }
 }
 
-internal sealed class CountingSource : IRuleSource
+internal sealed class CountingSource(IReadOnlyList<Rule>? rules = null, TimeSpan? delay = null) : IRuleSource
 {
-    private readonly IReadOnlyList<Rule> _rules;
-    private readonly TimeSpan _delay;
-    public CountingSource(IReadOnlyList<Rule>? rules = null, TimeSpan? delay = null)
-    {
-        _rules = rules ?? Array.Empty<Rule>();
-        _delay = delay ?? TimeSpan.Zero;
-    }
+    private readonly IReadOnlyList<Rule> _rules = rules ?? [];
+    private readonly TimeSpan _delay = delay ?? TimeSpan.Zero;
 
     public int LoadCount { get; private set; }
 
@@ -57,10 +51,9 @@ internal sealed class CountingSource : IRuleSource
     }
 }
 
-internal sealed class TableConnectionFactory : IDbConnectionFactory
+internal sealed class TableConnectionFactory(DataTable table) : IDbConnectionFactory
 {
-    public TableConnectionFactory(DataTable table) => Table = table;
-    public DataTable Table { get; }
+    public DataTable Table { get; } = table;
     public FakeDbConnection? LastConnection { get; private set; }
 
     public DbConnection CreateConnection(string connectionString)
@@ -70,12 +63,11 @@ internal sealed class TableConnectionFactory : IDbConnectionFactory
     }
 }
 
-internal sealed class FakeDbConnection : DbConnection
+internal sealed class FakeDbConnection(DataTable table) : DbConnection
 {
-    private readonly DataTable _table;
+    private readonly DataTable _table = table;
     private ConnectionState _state = ConnectionState.Closed;
 
-    public FakeDbConnection(DataTable table) => _table = table;
     public string? LastCommandText { get; private set; }
     public override string ConnectionString { get; set; } = string.Empty;
     public override string Database => "Fake";
@@ -91,18 +83,12 @@ internal sealed class FakeDbConnection : DbConnection
     internal void SetCommandText(string text) => LastCommandText = text;
 }
 
-internal sealed class FakeDbCommand : DbCommand
+internal sealed class FakeDbCommand(FakeDbConnection connection, DataTable table) : DbCommand
 {
-    private readonly FakeDbConnection _connection;
-    private readonly DataTable _table;
+    private readonly FakeDbConnection _connection = connection;
+    private readonly DataTable _table = table;
     private readonly FakeParameterCollection _parameters = new();
     private string _commandText = string.Empty;
-
-    public FakeDbCommand(FakeDbConnection connection, DataTable table)
-    {
-        _connection = connection;
-        _table = table;
-    }
 
     public override string CommandText
     {

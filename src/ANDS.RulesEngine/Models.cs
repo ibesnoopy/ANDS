@@ -34,7 +34,7 @@ public abstract record Condition;
 public sealed record ConditionGroup : Condition
 {
     public ConditionGroupType Group { get; init; }
-    public IReadOnlyList<Condition> Conditions { get; init; } = Array.Empty<Condition>();
+    public IReadOnlyList<Condition> Conditions { get; init; } = [];
 }
 
 public sealed record ComparisonCondition : Condition
@@ -59,7 +59,7 @@ public sealed record Rule
     public int Priority { get; init; }
     public bool Enabled { get; init; } = true;
     public Condition? Condition { get; init; }
-    public IReadOnlyList<RuleAction> Actions { get; init; } = Array.Empty<RuleAction>();
+    public IReadOnlyList<RuleAction> Actions { get; init; } = [];
 
     public void Validate()
     {
@@ -72,18 +72,14 @@ public sealed record Rule
             errors.Add("Condition is required.");
         else
             ConditionValidator.Validate(Condition, errors);
-        if (Actions is null)
-            errors.Add("Actions is required.");
-        else
-        {
-            for (var index = 0; index < Actions.Count; index++)
+        ValidationHelpers.ValidateCollection(Actions, errors, "Actions is required.",
+            (action, index) =>
             {
-                if (string.IsNullOrWhiteSpace(Actions[index].Type))
+                if (string.IsNullOrWhiteSpace(action.Type))
                     errors.Add($"Actions[{index}].Type is required.");
-                if (Actions[index].Parameters is null)
+                if (action.Parameters is null)
                     errors.Add($"Actions[{index}].Parameters is required.");
-            }
-        }
+            });
 
         if (errors.Count > 0)
             throw new RuleValidationException(Id, string.Join(" ", errors));
@@ -101,6 +97,22 @@ public sealed class RuleValidationException : Exception
     public string? RuleId { get; }
 }
 
+internal static class ValidationHelpers
+{
+    public static void ValidateCollection<T>(IReadOnlyList<T>? items, ICollection<string> errors,
+        string requiredMessage, Action<T, int> validateItem)
+    {
+        if (items is null)
+        {
+            errors.Add(requiredMessage);
+            return;
+        }
+
+        for (var index = 0; index < items.Count; index++)
+            validateItem(items[index], index);
+    }
+}
+
 internal static class ConditionValidator
 {
     public static void Validate(Condition condition, ICollection<string> errors)
@@ -108,18 +120,15 @@ internal static class ConditionValidator
         switch (condition)
         {
             case ConditionGroup group:
-                if (group.Conditions is null)
-                    errors.Add("Condition group Conditions is required.");
-                else
-                {
-                    for (var index = 0; index < group.Conditions.Count; index++)
+                ValidationHelpers.ValidateCollection(group.Conditions, errors,
+                    "Condition group Conditions is required.",
+                    (child, index) =>
                     {
-                        if (group.Conditions[index] is null)
+                        if (child is null)
                             errors.Add($"Condition.Conditions[{index}] cannot be null.");
                         else
-                            Validate(group.Conditions[index], errors);
-                    }
-                }
+                            Validate(child, errors);
+                    });
                 break;
             case ComparisonCondition comparison:
                 if (string.IsNullOrWhiteSpace(comparison.Field))
@@ -215,6 +224,8 @@ internal sealed class ConditionJsonConverter : JsonConverter<Condition>
 
 public static class RuleJsonSerializer
 {
+    internal static JsonSerializerOptions DefaultOptions { get; } = CreateOptions();
+
     public static JsonSerializerOptions CreateOptions()
     {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
