@@ -34,7 +34,7 @@ public abstract record Condition;
 public sealed record ConditionGroup : Condition
 {
     public ConditionGroupType Group { get; init; }
-    public IReadOnlyList<Condition> Conditions { get; init; } = Array.Empty<Condition>();
+    public IReadOnlyList<Condition> Conditions { get; init; } = [];
 }
 
 public sealed record ComparisonCondition : Condition
@@ -59,7 +59,7 @@ public sealed record Rule
     public int Priority { get; init; }
     public bool Enabled { get; init; } = true;
     public Condition? Condition { get; init; }
-    public IReadOnlyList<RuleAction> Actions { get; init; } = Array.Empty<RuleAction>();
+    public IReadOnlyList<RuleAction> Actions { get; init; } = [];
 
     public void Validate()
     {
@@ -222,6 +222,8 @@ internal sealed class ConditionJsonConverter : JsonConverter<Condition>
 
 public static class RuleJsonSerializer
 {
+    internal static JsonSerializerOptions DefaultOptions { get; } = CreateOptions();
+
     public static JsonSerializerOptions CreateOptions()
     {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)

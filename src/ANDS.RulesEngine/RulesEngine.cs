@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.Serialization;
 
 namespace ANDS.RulesEngine;
 
@@ -106,21 +105,8 @@ public sealed class RulesEngine : IRulesEngine
     public RulesEngine(IEnumerable<IRuleActionHandler>? handlers = null, RulesEngineOptions? options = null)
     {
         _options = options ?? new RulesEngineOptions();
-        _options.Validate();
-        _handlers = new Dictionary<string, IRuleActionHandler>(StringComparer.OrdinalIgnoreCase);
-        foreach (var handler in handlers ?? Array.Empty<IRuleActionHandler>())
-        {
-            if (handler is null)
-                throw new ArgumentException("Action handlers cannot contain null entries.", nameof(handlers));
-            if (string.IsNullOrWhiteSpace(handler.ActionType))
-                throw new ArgumentException(
-                    $"Action handler '{handler.GetType().Name}' must expose a non-empty ActionType.", nameof(handlers));
-            if (!_handlers.TryAdd(handler.ActionType, handler))
-                throw new ArgumentException(
-                    $"More than one action handler is registered for action type '{handler.ActionType}' " +
-                    $"('{_handlers[handler.ActionType].GetType().Name}' and '{handler.GetType().Name}'). " +
-                    "Action types are case-insensitive and must be unique.", nameof(handlers));
-        }
+        _handlers = (handlers ?? [])
+            .ToDictionary(handler => handler.ActionType, StringComparer.OrdinalIgnoreCase);
     }
 
     public async Task<RuleEvaluationResult> EvaluateAsync(IEnumerable<Rule> rules, object? facts,
@@ -130,7 +116,7 @@ public sealed class RulesEngine : IRulesEngine
         var matched = new List<Rule>();
         var executed = new List<ExecutedAction>();
         var errors = new List<RuleError>();
-        var aborted = false;
+        var evaluationOptions = new RuleEvaluationOptions { StringCaseSensitive = _options.StringCaseSensitive };
         var stopwatch = Stopwatch.StartNew();
         var context = new FactContext(facts);
         var orderedRules = rules.Where(rule => rule.Enabled).OrderBy(rule => rule.Priority).ThenBy(rule => rule.Id,
@@ -142,11 +128,7 @@ public sealed class RulesEngine : IRulesEngine
             try
             {
                 rule.Validate();
-                if (!ConditionEvaluator.Evaluate(rule.Condition!, context, new RuleEvaluationOptions
-                {
-                    StringCaseSensitive = _options.StringCaseSensitive,
-                    RegexTimeout = _options.RegexTimeout
-                }))
+                if (!ConditionEvaluator.Evaluate(rule.Condition!, context, evaluationOptions))
                     continue;
 
                 matched.Add(rule);
@@ -217,8 +199,6 @@ public sealed class RuleActionException : Exception
     public int Index { get; }
 }
 
-[Serializable]
-#pragma warning disable SYSLIB0051
 public class UnknownActionException : InvalidOperationException
 {
     public UnknownActionException() { }
@@ -227,14 +207,6 @@ public class UnknownActionException : InvalidOperationException
 
     public UnknownActionException(string? message, Exception? innerException)
         : base(message, innerException) { }
-
-    [Obsolete("Formatter-based serialization is obsolete.", DiagnosticId = "SYSLIB0051")]
-    protected UnknownActionException(SerializationInfo info, StreamingContext context)
-        : base(info, context)
-    {
-        ActionType = info.GetString(nameof(ActionType));
-        RuleId = info.GetString(nameof(RuleId));
-    }
 
     public UnknownActionException(string actionType, string ruleId)
         : base($"No handler registered for action type '{actionType}' on rule '{ruleId}'.")
@@ -245,14 +217,4 @@ public class UnknownActionException : InvalidOperationException
 
     public string? ActionType { get; }
     public string? RuleId { get; }
-
-    [Obsolete("Formatter-based serialization is obsolete.", DiagnosticId = "SYSLIB0051")]
-    public override void GetObjectData(SerializationInfo info, StreamingContext context)
-    {
-        ArgumentNullException.ThrowIfNull(info);
-        info.AddValue(nameof(ActionType), ActionType);
-        info.AddValue(nameof(RuleId), RuleId);
-        base.GetObjectData(info, context);
-    }
 }
-#pragma warning restore SYSLIB0051

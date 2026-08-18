@@ -1,6 +1,6 @@
 # ANDS Rules Engine
 
-ANDS is a .NET 8 rules engine for evaluating declarative JSON rules against
+ANDS is a .NET 10 rules engine for evaluating declarative JSON rules against
 dictionary or POCO facts. Conditions are data, while actions are dispatched
 through application-provided handlers.
 

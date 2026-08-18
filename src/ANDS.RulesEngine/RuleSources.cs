@@ -18,7 +18,7 @@ public sealed class JsonFileRuleSource : IRuleSource
     public JsonFileRuleSource(string filePath, JsonSerializerOptions? serializerOptions = null)
     {
         _filePath = filePath ?? throw new ArgumentNullException(nameof(filePath));
-        _serializerOptions = serializerOptions ?? RuleJsonSerializer.CreateOptions();
+        _serializerOptions = serializerOptions ?? RuleJsonSerializer.DefaultOptions;
     }
 
     public async Task<IReadOnlyList<Rule>> LoadRulesAsync(CancellationToken cancellationToken = default)
@@ -85,17 +85,55 @@ public sealed class SqlRuleSourceOptions
 
     public void Validate()
     {
+        _ = GetValidatedIdentifiers();
+    }
+
+    internal SqlRuleIdentifiers GetValidatedIdentifiers()
+    {
         if (string.IsNullOrWhiteSpace(ConnectionString))
             throw new ArgumentException("A SQL connection string is required.", nameof(ConnectionString));
-        _ = SqlRuleQueryBuilder.QuoteIdentifier(Schema, nameof(Schema));
-        _ = SqlRuleQueryBuilder.QuoteIdentifier(Table, nameof(Table));
-        _ = SqlRuleQueryBuilder.QuoteIdentifier(IdColumn, nameof(IdColumn));
-        _ = SqlRuleQueryBuilder.QuoteIdentifier(NameColumn, nameof(NameColumn));
-        _ = SqlRuleQueryBuilder.QuoteIdentifier(DescriptionColumn, nameof(DescriptionColumn));
-        _ = SqlRuleQueryBuilder.QuoteIdentifier(PriorityColumn, nameof(PriorityColumn));
-        _ = SqlRuleQueryBuilder.QuoteIdentifier(EnabledColumn, nameof(EnabledColumn));
-        _ = SqlRuleQueryBuilder.QuoteIdentifier(DefinitionColumn, nameof(DefinitionColumn));
+
+        var schema = SqlRuleQueryBuilder.QuoteIdentifier(Schema, nameof(Schema));
+        var table = SqlRuleQueryBuilder.QuoteIdentifier(Table, nameof(Table));
+        return new SqlRuleIdentifiers(
+            schema,
+            table,
+            SqlRuleQueryBuilder.QuoteIdentifier(IdColumn, nameof(IdColumn)),
+            SqlRuleQueryBuilder.QuoteIdentifier(NameColumn, nameof(NameColumn)),
+            SqlRuleQueryBuilder.QuoteIdentifier(DescriptionColumn, nameof(DescriptionColumn)),
+            SqlRuleQueryBuilder.QuoteIdentifier(PriorityColumn, nameof(PriorityColumn)),
+            SqlRuleQueryBuilder.QuoteIdentifier(EnabledColumn, nameof(EnabledColumn)),
+            SqlRuleQueryBuilder.QuoteIdentifier(DefinitionColumn, nameof(DefinitionColumn)));
     }
+}
+
+internal sealed class SqlRuleIdentifiers(
+    string schema,
+    string table,
+    string idColumn,
+    string nameColumn,
+    string descriptionColumn,
+    string priorityColumn,
+    string enabledColumn,
+    string definitionColumn)
+{
+    public string Schema { get; } = schema;
+    public string Table { get; } = table;
+    public string IdColumn { get; } = idColumn;
+    public string NameColumn { get; } = nameColumn;
+    public string DescriptionColumn { get; } = descriptionColumn;
+    public string PriorityColumn { get; } = priorityColumn;
+    public string EnabledColumn { get; } = enabledColumn;
+    public string DefinitionColumn { get; } = definitionColumn;
+    public IReadOnlyList<string> SelectColumns { get; } =
+    [
+        idColumn,
+        nameColumn,
+        descriptionColumn,
+        priorityColumn,
+        enabledColumn,
+        definitionColumn
+    ];
 }
 
 public interface IDbConnectionFactory
@@ -113,19 +151,8 @@ public static class SqlRuleQueryBuilder
     public static string BuildSelect(SqlRuleSourceOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var schema = QuoteIdentifier(options.Schema, nameof(options.Schema));
-        var table = QuoteIdentifier(options.Table, nameof(options.Table));
-        options.Validate();
-        var columns = new[]
-        {
-            (options.IdColumn, nameof(options.IdColumn)),
-            (options.NameColumn, nameof(options.NameColumn)),
-            (options.DescriptionColumn, nameof(options.DescriptionColumn)),
-            (options.PriorityColumn, nameof(options.PriorityColumn)),
-            (options.EnabledColumn, nameof(options.EnabledColumn)),
-            (options.DefinitionColumn, nameof(options.DefinitionColumn))
-        }.Select(column => QuoteIdentifier(column.Item1, column.Item2)).ToArray();
-        return $"SELECT {string.Join(", ", columns)} FROM {schema}.{table} ORDER BY {QuoteIdentifier(options.PriorityColumn, nameof(options.PriorityColumn))}, {QuoteIdentifier(options.IdColumn, nameof(options.IdColumn))};";
+        var identifiers = options.GetValidatedIdentifiers();
+        return $"SELECT {string.Join(", ", identifiers.SelectColumns)} FROM {identifiers.Schema}.{identifiers.Table} ORDER BY {identifiers.PriorityColumn}, {identifiers.IdColumn};";
     }
 
     public static string QuoteIdentifier(string identifier, string optionName)
@@ -149,7 +176,7 @@ public sealed class SqlRuleSource : IRuleSource
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _connectionFactory = connectionFactory ?? new SqlConnectionFactory();
-        _serializerOptions = serializerOptions ?? RuleJsonSerializer.CreateOptions();
+        _serializerOptions = serializerOptions ?? RuleJsonSerializer.DefaultOptions;
         _options.Validate();
     }
 
@@ -192,20 +219,19 @@ public static class SqlRuleMapper
         JsonSerializerOptions? serializerOptions = null)
     {
         ArgumentNullException.ThrowIfNull(reader);
-        ArgumentNullException.ThrowIfNull(options);
-        var jsonOptions = serializerOptions ?? RuleJsonSerializer.CreateOptions();
-        var id = ReadRequiredString(reader, options.IdColumn, "id");
-        var name = ReadRequiredString(reader, options.NameColumn, "name");
-        var definition = ReadColumn(reader, options.DefinitionColumn, id);
-        if (definition is null or DBNull ||
-            string.IsNullOrWhiteSpace(Convert.ToString(definition, CultureInfo.InvariantCulture)))
-            throw new RuleValidationException(id, $"Definition column '{options.DefinitionColumn}' is null or empty.");
+        var jsonOptions = serializerOptions ?? RuleJsonSerializer.DefaultOptions;
+        var id = ReadRequiredString(reader, options.IdColumn,
+            $"The id column '{options.IdColumn}' is null or empty.");
+        var name = ReadRequiredString(reader, options.NameColumn,
+            $"The name column '{options.NameColumn}' is null or empty.");
+        var definition = ReadRequiredString(reader, options.DefinitionColumn,
+            $"Definition column '{options.DefinitionColumn}' is null or empty.", id);
 
         RuleDefinition ruleDefinition;
         try
         {
             ruleDefinition = JsonSerializer.Deserialize<RuleDefinition>(
-                                 Convert.ToString(definition, CultureInfo.InvariantCulture)!, jsonOptions)
+                                 definition, jsonOptions)
                              ?? throw new JsonException("Definition JSON was null.");
         }
         catch (JsonException exception)
@@ -219,25 +245,32 @@ public static class SqlRuleMapper
         {
             Id = id,
             Name = name,
-            Description = description is null or DBNull
-                ? null
-                : Convert.ToString(description, CultureInfo.InvariantCulture),
-            Priority = ReadValue<int>(reader, options.PriorityColumn, id, "an integer"),
-            Enabled = ReadValue<bool>(reader, options.EnabledColumn, id, "a boolean"),
+            Description = ReadOptionalString(reader, options.DescriptionColumn),
+            Priority = Convert.ToInt32(reader[options.PriorityColumn], CultureInfo.InvariantCulture),
+            Enabled = Convert.ToBoolean(reader[options.EnabledColumn], CultureInfo.InvariantCulture),
             Condition = ruleDefinition.Condition,
-            Actions = ruleDefinition.Actions ?? Array.Empty<RuleAction>()
+            Actions = ruleDefinition.Actions ?? []
         };
         rule.Validate();
         return rule;
     }
 
-    private static string ReadRequiredString(DbDataReader reader, string column, string label)
+    private static string ReadRequiredString(
+        DbDataReader reader,
+        string column,
+        string message,
+        string? ruleId = null)
     {
-        var value = ReadColumn(reader, column, null);
-        if (value is null or DBNull ||
-            string.IsNullOrWhiteSpace(Convert.ToString(value, CultureInfo.InvariantCulture)))
-            throw new RuleValidationException(null, $"The {label} column '{column}' is null or empty.");
-        return Convert.ToString(value, CultureInfo.InvariantCulture)!;
+        var value = ReadOptionalString(reader, column);
+        if (string.IsNullOrWhiteSpace(value))
+            throw new RuleValidationException(ruleId, message);
+        return value;
+    }
+
+    private static string? ReadOptionalString(DbDataReader reader, string column)
+    {
+        var value = reader[column];
+        return value is null or DBNull ? null : Convert.ToString(value, CultureInfo.InvariantCulture);
     }
 
     private static object? ReadColumn(DbDataReader reader, string column, string? ruleId)

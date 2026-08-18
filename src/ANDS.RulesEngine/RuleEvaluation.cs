@@ -8,7 +8,8 @@ namespace ANDS.RulesEngine;
 public sealed class RuleEvaluationOptions
 {
     public bool StringCaseSensitive { get; init; }
-    public TimeSpan RegexTimeout { get; init; } = TimeSpan.FromSeconds(1);
+    internal StringComparison Comparison =>
+        StringCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
 }
 
 internal static class ConditionEvaluator
@@ -70,8 +71,10 @@ internal static class ConditionEvaluator
             ComparisonOperator.LessThan => Compare(actual, expected, options) < 0,
             ComparisonOperator.LessThanOrEqual => Compare(actual, expected, options) <= 0,
             ComparisonOperator.Contains => Contains(actual, expected, options),
-            ComparisonOperator.StartsWith => StartsWith(actual, expected, options),
-            ComparisonOperator.EndsWith => EndsWith(actual, expected, options),
+            ComparisonOperator.StartsWith => StringPredicate(actual, expected, options,
+                static (value, expectedValue, comparison) => value.StartsWith(expectedValue, comparison), "StartsWith"),
+            ComparisonOperator.EndsWith => StringPredicate(actual, expected, options,
+                static (value, expectedValue, comparison) => value.EndsWith(expectedValue, comparison), "EndsWith"),
             ComparisonOperator.In => In(actual, expected, options),
             ComparisonOperator.NotIn => !In(actual, expected, options),
             ComparisonOperator.Matches => Matches(actual, expected, options),
@@ -90,8 +93,7 @@ internal static class ConditionEvaluator
         if (actual is DateTime actualDate && TryGetDateTime(expected, out var expectedDate))
             return actualDate == expectedDate;
         if (actual is string actualString && expected is string expectedString)
-            return string.Equals(actualString, expectedString,
-                options.StringCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+            return string.Equals(actualString, expectedString, options.Comparison);
         return actual.GetType() == expected.GetType() && Equals(actual, expected);
     }
 
@@ -104,8 +106,7 @@ internal static class ConditionEvaluator
         if (actual is DateTime actualDate && TryGetDateTime(expected, out var expectedDate))
             return actualDate.CompareTo(expectedDate);
         if (actual is string actualString && expected is string expectedString)
-            return string.Compare(actualString, expectedString,
-                options.StringCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+            return string.Compare(actualString, expectedString, options.Comparison);
         throw new InvalidOperationException(
             $"Values of type '{actual.GetType().Name}' and '{expected.GetType().Name}' cannot be ordered.");
     }
@@ -116,28 +117,19 @@ internal static class ConditionEvaluator
         {
             if (expected is not string expectedString)
                 throw new InvalidOperationException("Contains requires a string expected value.");
-            return actualString.Contains(expectedString,
-                options.StringCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+            return actualString.Contains(expectedString, options.Comparison);
         }
         if (actual is IEnumerable enumerable && actual is not string)
             return enumerable.Cast<object?>().Any(item => AreEqual(item, expected, options));
         throw new InvalidOperationException("Contains requires a string or collection actual value and a compatible value.");
     }
 
-    private static bool StartsWith(object? actual, object? expected, RuleEvaluationOptions options)
+    private static bool StringPredicate(object? actual, object? expected, RuleEvaluationOptions options,
+        Func<string, string, StringComparison, bool> predicate, string operation)
     {
         if (actual is not string actualString || expected is not string expectedString)
-            throw new InvalidOperationException("StartsWith requires string actual and expected values.");
-        return actualString.StartsWith(expectedString,
-            options.StringCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool EndsWith(object? actual, object? expected, RuleEvaluationOptions options)
-    {
-        if (actual is not string actualString || expected is not string expectedString)
-            throw new InvalidOperationException("EndsWith requires string actual and expected values.");
-        return actualString.EndsWith(expectedString,
-            options.StringCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+            throw new InvalidOperationException($"{operation} requires string actual and expected values.");
+        return predicate(actualString, expectedString, options.Comparison);
     }
 
     private static bool In(object? actual, object? expected, RuleEvaluationOptions options)

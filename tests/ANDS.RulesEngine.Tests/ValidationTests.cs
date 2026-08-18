@@ -28,7 +28,7 @@ public sealed class ValidationTests
         {
             Id = "id",
             Name = "name",
-            Actions = Array.Empty<RuleAction>()
+            Actions = []
         }.Validate());
         Assert.Contains("Condition is required", exception.Message);
     }
@@ -40,7 +40,7 @@ public sealed class ValidationTests
         {
             Name = "name",
             Condition = TestSupport.Comparison("value", ComparisonOperator.IsNull),
-            Actions = Array.Empty<RuleAction>()
+            Actions = []
         }.Validate());
         Assert.Contains("Id is required", exception.Message);
     }
@@ -52,7 +52,7 @@ public sealed class ValidationTests
         {
             Id = "id",
             Condition = TestSupport.Comparison("value", ComparisonOperator.IsNull),
-            Actions = Array.Empty<RuleAction>()
+            Actions = []
         }.Validate());
         Assert.Contains("Name is required", exception.Message);
     }
