@@ -72,14 +72,18 @@ public sealed record Rule
             errors.Add("Condition is required.");
         else
             ConditionValidator.Validate(Condition, errors);
-        ValidationHelpers.ValidateCollection(Actions, errors, "Actions is required.",
-            (action, index) =>
+        if (Actions is null)
+            errors.Add("Actions is required.");
+        else
+        {
+            for (var index = 0; index < Actions.Count; index++)
             {
-                if (string.IsNullOrWhiteSpace(action.Type))
+                if (string.IsNullOrWhiteSpace(Actions[index].Type))
                     errors.Add($"Actions[{index}].Type is required.");
-                if (action.Parameters is null)
+                if (Actions[index].Parameters is null)
                     errors.Add($"Actions[{index}].Parameters is required.");
-            });
+            }
+        }
 
         if (errors.Count > 0)
             throw new RuleValidationException(Id, string.Join(" ", errors));
@@ -97,22 +101,6 @@ public sealed class RuleValidationException : Exception
     public string? RuleId { get; }
 }
 
-internal static class ValidationHelpers
-{
-    public static void ValidateCollection<T>(IReadOnlyList<T>? items, ICollection<string> errors,
-        string requiredMessage, Action<T, int> validateItem)
-    {
-        if (items is null)
-        {
-            errors.Add(requiredMessage);
-            return;
-        }
-
-        for (var index = 0; index < items.Count; index++)
-            validateItem(items[index], index);
-    }
-}
-
 internal static class ConditionValidator
 {
     public static void Validate(Condition condition, ICollection<string> errors)
@@ -120,15 +108,18 @@ internal static class ConditionValidator
         switch (condition)
         {
             case ConditionGroup group:
-                ValidationHelpers.ValidateCollection(group.Conditions, errors,
-                    "Condition group Conditions is required.",
-                    (child, index) =>
+                if (group.Conditions is null)
+                    errors.Add("Condition group Conditions is required.");
+                else
+                {
+                    for (var index = 0; index < group.Conditions.Count; index++)
                     {
-                        if (child is null)
+                        if (group.Conditions[index] is null)
                             errors.Add($"Condition.Conditions[{index}] cannot be null.");
                         else
-                            Validate(child, errors);
-                    });
+                            Validate(group.Conditions[index], errors);
+                    }
+                }
                 break;
             case ComparisonCondition comparison:
                 if (string.IsNullOrWhiteSpace(comparison.Field))

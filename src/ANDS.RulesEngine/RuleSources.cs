@@ -75,7 +75,7 @@ public sealed class SqlRuleSourceOptions
         _ = GetValidatedIdentifiers();
     }
 
-    internal (string Schema, string Table, string[] Columns) GetValidatedIdentifiers()
+    internal SqlRuleIdentifiers GetValidatedIdentifiers()
     {
         if (string.IsNullOrWhiteSpace(ConnectionString))
             throw new ArgumentException("A SQL connection string is required.", nameof(ConnectionString));
@@ -83,9 +83,18 @@ public sealed class SqlRuleSourceOptions
         var schema = SqlRuleQueryBuilder.QuoteIdentifier(Schema, nameof(Schema));
         var table = SqlRuleQueryBuilder.QuoteIdentifier(Table, nameof(Table));
         var columns = GetColumnIdentifiers()
-            .Select(identifier => SqlRuleQueryBuilder.QuoteIdentifier(identifier.Value, identifier.Name))
-            .ToArray();
-        return (schema, table, columns);
+            .ToDictionary(
+                identifier => identifier.Name,
+                identifier => SqlRuleQueryBuilder.QuoteIdentifier(identifier.Value, identifier.Name));
+        return new SqlRuleIdentifiers(
+            schema,
+            table,
+            columns[nameof(IdColumn)],
+            columns[nameof(NameColumn)],
+            columns[nameof(DescriptionColumn)],
+            columns[nameof(PriorityColumn)],
+            columns[nameof(EnabledColumn)],
+            columns[nameof(DefinitionColumn)]);
     }
 
     private IEnumerable<(string Value, string Name)> GetColumnIdentifiers() =>
@@ -96,6 +105,35 @@ public sealed class SqlRuleSourceOptions
         (PriorityColumn, nameof(PriorityColumn)),
         (EnabledColumn, nameof(EnabledColumn)),
         (DefinitionColumn, nameof(DefinitionColumn))
+    ];
+}
+
+internal sealed class SqlRuleIdentifiers(
+    string schema,
+    string table,
+    string idColumn,
+    string nameColumn,
+    string descriptionColumn,
+    string priorityColumn,
+    string enabledColumn,
+    string definitionColumn)
+{
+    public string Schema { get; } = schema;
+    public string Table { get; } = table;
+    public string IdColumn { get; } = idColumn;
+    public string NameColumn { get; } = nameColumn;
+    public string DescriptionColumn { get; } = descriptionColumn;
+    public string PriorityColumn { get; } = priorityColumn;
+    public string EnabledColumn { get; } = enabledColumn;
+    public string DefinitionColumn { get; } = definitionColumn;
+    public IReadOnlyList<string> SelectColumns { get; } =
+    [
+        idColumn,
+        nameColumn,
+        descriptionColumn,
+        priorityColumn,
+        enabledColumn,
+        definitionColumn
     ];
 }
 
@@ -115,7 +153,7 @@ public static class SqlRuleQueryBuilder
     {
         ArgumentNullException.ThrowIfNull(options);
         var identifiers = options.GetValidatedIdentifiers();
-        return $"SELECT {string.Join(", ", identifiers.Columns)} FROM {identifiers.Schema}.{identifiers.Table} ORDER BY {identifiers.Columns[3]}, {identifiers.Columns[0]};";
+        return $"SELECT {string.Join(", ", identifiers.SelectColumns)} FROM {identifiers.Schema}.{identifiers.Table} ORDER BY {identifiers.PriorityColumn}, {identifiers.IdColumn};";
     }
 
     public static string QuoteIdentifier(string identifier, string optionName)
@@ -164,9 +202,11 @@ public static class SqlRuleMapper
     {
         ArgumentNullException.ThrowIfNull(reader);
         var jsonOptions = serializerOptions ?? RuleJsonSerializer.DefaultOptions;
-        var id = ReadRequiredString(reader, options.IdColumn, "id");
-        var name = ReadRequiredString(reader, options.NameColumn, "name");
-        var definition = ReadRequiredStringCore(reader, options.DefinitionColumn,
+        var id = ReadRequiredString(reader, options.IdColumn,
+            $"The id column '{options.IdColumn}' is null or empty.");
+        var name = ReadRequiredString(reader, options.NameColumn,
+            $"The name column '{options.NameColumn}' is null or empty.");
+        var definition = ReadRequiredString(reader, options.DefinitionColumn,
             $"Definition column '{options.DefinitionColumn}' is null or empty.", id);
 
         RuleDefinition ruleDefinition;
@@ -196,12 +236,7 @@ public static class SqlRuleMapper
         return rule;
     }
 
-    private static string ReadRequiredString(DbDataReader reader, string column, string label)
-    {
-        return ReadRequiredStringCore(reader, column, $"The {label} column '{column}' is null or empty.");
-    }
-
-    private static string ReadRequiredStringCore(
+    private static string ReadRequiredString(
         DbDataReader reader,
         string column,
         string message,

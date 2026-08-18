@@ -8,7 +8,7 @@ namespace ANDS.RulesEngine;
 public sealed class RuleEvaluationOptions
 {
     public bool StringCaseSensitive { get; init; }
-    internal System.StringComparison StringComparison =>
+    internal StringComparison Comparison =>
         StringCaseSensitive ? System.StringComparison.Ordinal : System.StringComparison.OrdinalIgnoreCase;
 }
 
@@ -81,7 +81,7 @@ internal static class ConditionEvaluator
         if (actual is DateTime actualDate && TryGetDateTime(expected, out var expectedDate))
             return actualDate == expectedDate;
         if (actual is string actualString && expected is string expectedString)
-            return string.Equals(actualString, expectedString, options.StringComparison);
+            return string.Equals(actualString, expectedString, options.Comparison);
         return actual.GetType() == expected.GetType() && Equals(actual, expected);
     }
 
@@ -95,7 +95,7 @@ internal static class ConditionEvaluator
         if (actual is DateTime actualDate && TryGetDateTime(expected, out var expectedDate))
             return actualDate.CompareTo(expectedDate);
         if (actual is string actualString && expected is string expectedString)
-            return string.Compare(actualString, expectedString, options.StringComparison);
+            return string.Compare(actualString, expectedString, options.Comparison);
         throw new InvalidOperationException(
             $"Values of type '{actual.GetType().Name}' and '{expected.GetType().Name}' cannot be ordered.");
     }
@@ -106,7 +106,7 @@ internal static class ConditionEvaluator
         {
             if (expected is not string expectedString)
                 throw new InvalidOperationException("Contains requires a string expected value.");
-            return actualString.Contains(expectedString, options.StringComparison);
+            return actualString.Contains(expectedString, options.Comparison);
         }
         if (actual is IEnumerable enumerable && actual is not string)
             return enumerable.Cast<object?>().Any(item => AreEqual(item, expected, options));
@@ -118,7 +118,7 @@ internal static class ConditionEvaluator
     {
         if (actual is not string actualString || expected is not string expectedString)
             throw new InvalidOperationException($"{operation} requires string actual and expected values.");
-        return predicate(actualString, expectedString, options.StringComparison);
+        return predicate(actualString, expectedString, options.Comparison);
     }
 
     private static bool In(object? actual, object? expected, RuleEvaluationOptions options)
