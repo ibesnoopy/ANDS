@@ -1,0 +1,51 @@
+@page "/Rules/Edit/{id?}"
+@model ANDS.RulesEngine.Web.Pages.Rules.EditModel
+@{
+    ViewData["Title"] = Model.IsNew ? "New rule" : $"Edit {Model.Input.Id}";
+}
+
+<h1 class="h3 mb-4">@ViewData["Title"]</h1>
+
+<form method="post">
+    <div asp-validation-summary="All" class="text-danger mb-3"></div>
+    <input type="hidden" asp-for="IsNew" />
+    <div class="row">
+        <div class="col-md-4 mb-3">
+            <label asp-for="Input.Id" class="form-label"></label>
+            <input asp-for="Input.Id" class="form-control" readonly="@(!Model.IsNew)" />
+            <span asp-validation-for="Input.Id" class="text-danger"></span>
+        </div>
+        <div class="col-md-5 mb-3">
+            <label asp-for="Input.Name" class="form-label"></label>
+            <input asp-for="Input.Name" class="form-control" />
+            <span asp-validation-for="Input.Name" class="text-danger"></span>
+        </div>
+        <div class="col-md-3 mb-3">
+            <label asp-for="Input.Priority" class="form-label"></label>
+            <input asp-for="Input.Priority" class="form-control" />
+            <span asp-validation-for="Input.Priority" class="text-danger"></span>
+        </div>
+    </div>
+    <div class="mb-3">
+        <label asp-for="Input.Description" class="form-label"></label>
+        <input asp-for="Input.Description" class="form-control" />
+    </div>
+    <div class="form-check mb-3">
+        <input asp-for="Input.Enabled" class="form-check-input" />
+        <label asp-for="Input.Enabled" class="form-check-label"></label>
+    </div>
+    <div class="mb-3">
+        <label asp-for="Input.Definition" class="form-label"></label>
+        <textarea asp-for="Input.Definition" class="form-control font-monospace" rows="18"></textarea>
+        <div class="form-text">
+            JSON object with a <code>condition</code> tree and an <code>actions</code> array.
+        </div>
+        <span asp-validation-for="Input.Definition" class="text-danger"></span>
+    </div>
+    <button type="submit" class="btn btn-primary">Save</button>
+    <a asp-page="/Rules/Index" class="btn btn-link">Cancel</a>
+</form>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

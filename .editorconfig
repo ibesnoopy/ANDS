@@ -1,0 +1,6 @@
+root = true
+
+# EF Core scaffolds migration files; they are not hand-maintained source.
+[src/ANDS.RulesEngine.Web/Data/Migrations/*.cs]
+generated_code = true
+dotnet_analyzer_diagnostic.severity = none
