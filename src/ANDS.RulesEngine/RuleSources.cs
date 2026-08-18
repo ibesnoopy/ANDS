@@ -82,30 +82,16 @@ public sealed class SqlRuleSourceOptions
 
         var schema = SqlRuleQueryBuilder.QuoteIdentifier(Schema, nameof(Schema));
         var table = SqlRuleQueryBuilder.QuoteIdentifier(Table, nameof(Table));
-        var columns = GetColumnIdentifiers()
-            .ToDictionary(
-                identifier => identifier.Name,
-                identifier => SqlRuleQueryBuilder.QuoteIdentifier(identifier.Value, identifier.Name));
         return new SqlRuleIdentifiers(
             schema,
             table,
-            columns[nameof(IdColumn)],
-            columns[nameof(NameColumn)],
-            columns[nameof(DescriptionColumn)],
-            columns[nameof(PriorityColumn)],
-            columns[nameof(EnabledColumn)],
-            columns[nameof(DefinitionColumn)]);
+            SqlRuleQueryBuilder.QuoteIdentifier(IdColumn, nameof(IdColumn)),
+            SqlRuleQueryBuilder.QuoteIdentifier(NameColumn, nameof(NameColumn)),
+            SqlRuleQueryBuilder.QuoteIdentifier(DescriptionColumn, nameof(DescriptionColumn)),
+            SqlRuleQueryBuilder.QuoteIdentifier(PriorityColumn, nameof(PriorityColumn)),
+            SqlRuleQueryBuilder.QuoteIdentifier(EnabledColumn, nameof(EnabledColumn)),
+            SqlRuleQueryBuilder.QuoteIdentifier(DefinitionColumn, nameof(DefinitionColumn)));
     }
-
-    private IEnumerable<(string Value, string Name)> GetColumnIdentifiers() =>
-    [
-        (IdColumn, nameof(IdColumn)),
-        (NameColumn, nameof(NameColumn)),
-        (DescriptionColumn, nameof(DescriptionColumn)),
-        (PriorityColumn, nameof(PriorityColumn)),
-        (EnabledColumn, nameof(EnabledColumn)),
-        (DefinitionColumn, nameof(DefinitionColumn))
-    ];
 }
 
 internal sealed class SqlRuleIdentifiers(

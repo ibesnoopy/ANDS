@@ -9,7 +9,7 @@ public sealed class RuleEvaluationOptions
 {
     public bool StringCaseSensitive { get; init; }
     internal StringComparison Comparison =>
-        StringCaseSensitive ? System.StringComparison.Ordinal : System.StringComparison.OrdinalIgnoreCase;
+        StringCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
 }
 
 internal static class ConditionEvaluator
