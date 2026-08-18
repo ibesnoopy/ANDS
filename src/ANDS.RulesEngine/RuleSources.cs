@@ -69,6 +69,20 @@ public sealed class SqlRuleSourceOptions
     public string PriorityColumn { get; init; } = "Priority";
     public string EnabledColumn { get; init; } = "Enabled";
     public string DefinitionColumn { get; init; } = "Definition";
+
+    public void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(ConnectionString))
+            throw new ArgumentException("A SQL connection string is required.", nameof(ConnectionString));
+        _ = SqlRuleQueryBuilder.QuoteIdentifier(Schema, nameof(Schema));
+        _ = SqlRuleQueryBuilder.QuoteIdentifier(Table, nameof(Table));
+        _ = SqlRuleQueryBuilder.QuoteIdentifier(IdColumn, nameof(IdColumn));
+        _ = SqlRuleQueryBuilder.QuoteIdentifier(NameColumn, nameof(NameColumn));
+        _ = SqlRuleQueryBuilder.QuoteIdentifier(DescriptionColumn, nameof(DescriptionColumn));
+        _ = SqlRuleQueryBuilder.QuoteIdentifier(PriorityColumn, nameof(PriorityColumn));
+        _ = SqlRuleQueryBuilder.QuoteIdentifier(EnabledColumn, nameof(EnabledColumn));
+        _ = SqlRuleQueryBuilder.QuoteIdentifier(DefinitionColumn, nameof(DefinitionColumn));
+    }
 }
 
 public interface IDbConnectionFactory
@@ -88,11 +102,16 @@ public static class SqlRuleQueryBuilder
         ArgumentNullException.ThrowIfNull(options);
         var schema = QuoteIdentifier(options.Schema, nameof(options.Schema));
         var table = QuoteIdentifier(options.Table, nameof(options.Table));
+        options.Validate();
         var columns = new[]
         {
-            options.IdColumn, options.NameColumn, options.DescriptionColumn, options.PriorityColumn,
-            options.EnabledColumn, options.DefinitionColumn
-        }.Select(column => QuoteIdentifier(column, nameof(column))).ToArray();
+            (options.IdColumn, nameof(options.IdColumn)),
+            (options.NameColumn, nameof(options.NameColumn)),
+            (options.DescriptionColumn, nameof(options.DescriptionColumn)),
+            (options.PriorityColumn, nameof(options.PriorityColumn)),
+            (options.EnabledColumn, nameof(options.EnabledColumn)),
+            (options.DefinitionColumn, nameof(options.DefinitionColumn))
+        }.Select(column => QuoteIdentifier(column.Item1, column.Item2)).ToArray();
         return $"SELECT {string.Join(", ", columns)} FROM {schema}.{table} ORDER BY {QuoteIdentifier(options.PriorityColumn, nameof(options.PriorityColumn))}, {QuoteIdentifier(options.IdColumn, nameof(options.IdColumn))};";
     }
 
@@ -118,9 +137,7 @@ public sealed class SqlRuleSource : IRuleSource
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _connectionFactory = connectionFactory ?? new SqlConnectionFactory();
         _serializerOptions = serializerOptions ?? RuleJsonSerializer.CreateOptions();
-        if (string.IsNullOrWhiteSpace(_options.ConnectionString))
-            throw new ArgumentException("A SQL connection string is required.", nameof(options));
-        _ = SqlRuleQueryBuilder.BuildSelect(_options);
+        _options.Validate();
     }
 
     public async Task<IReadOnlyList<Rule>> LoadRulesAsync(CancellationToken cancellationToken = default)

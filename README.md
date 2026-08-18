@@ -44,13 +44,23 @@ Supported operators are `equal`, `notEqual`, `greaterThan`,
 
 `all` over zero children is true, `any` over zero children is false, and
 `none` over zero children is true. Missing paths are not null: `isNull` only
-matches a present path whose value is null.
+matches a present path whose value is null, while `isNotNull` requires a
+present non-null path. Other operators return false for missing paths.
+Duplicate rule IDs are allowed by the sources and are preserved in source
+order; callers that require unique IDs should validate that policy before
+evaluation.
 
 Numbers use invariant-culture numeric conversion, dates use invariant
 round-trip parsing, booleans accept booleans (and exact `"true"`/`"false"`
 strings), and ordinary strings are never silently converted from arbitrary
 objects. String comparisons are case-insensitive by default and can be made
 case-sensitive with `RulesEngineOptions`.
+
+For a present value, a type mismatch is an evaluation error rather than a
+silent non-match. This applies to ordering, `contains`, `startsWith`,
+`endsWith`, `matches`, and invalid `in`/`notIn` operands. Configure
+`RuleErrorBehavior.Continue` to record the error and evaluate later rules;
+`Abort` stops evaluation after the first rule error.
 
 ## Usage
 

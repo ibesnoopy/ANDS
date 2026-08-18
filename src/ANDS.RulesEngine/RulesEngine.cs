@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.Serialization;
 
 namespace ANDS.RulesEngine;
 
@@ -101,8 +102,7 @@ public sealed class RulesEngine : IRulesEngine
                     var action = rule.Actions[index];
                     if (!_handlers.TryGetValue(action.Type, out var handler))
                     {
-                        var exception = new UnknownActionException(
-                            $"No handler registered for action type '{action.Type}'.");
+                        var exception = new UnknownActionException(action.Type, rule.Id);
                         if (_options.UnknownActionBehavior == UnknownActionBehavior.Throw)
                             throw exception;
                         errors.Add(new RuleError(rule.Id, exception.Message, exception));
@@ -133,7 +133,42 @@ public sealed class RulesEngine : IRulesEngine
     }
 }
 
-internal sealed class UnknownActionException : InvalidOperationException
+[Serializable]
+#pragma warning disable SYSLIB0051
+public class UnknownActionException : InvalidOperationException
 {
-    public UnknownActionException(string message) : base(message) { }
+    public UnknownActionException() { }
+
+    public UnknownActionException(string? message) : base(message) { }
+
+    public UnknownActionException(string? message, Exception? innerException)
+        : base(message, innerException) { }
+
+    [Obsolete("Formatter-based serialization is obsolete.", DiagnosticId = "SYSLIB0051")]
+    protected UnknownActionException(SerializationInfo info, StreamingContext context)
+        : base(info, context)
+    {
+        ActionType = info.GetString(nameof(ActionType));
+        RuleId = info.GetString(nameof(RuleId));
+    }
+
+    public UnknownActionException(string actionType, string ruleId)
+        : base($"No handler registered for action type '{actionType}' on rule '{ruleId}'.")
+    {
+        ActionType = actionType;
+        RuleId = ruleId;
+    }
+
+    public string? ActionType { get; }
+    public string? RuleId { get; }
+
+    [Obsolete("Formatter-based serialization is obsolete.", DiagnosticId = "SYSLIB0051")]
+    public override void GetObjectData(SerializationInfo info, StreamingContext context)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        info.AddValue(nameof(ActionType), ActionType);
+        info.AddValue(nameof(RuleId), RuleId);
+        base.GetObjectData(info, context);
+    }
 }
+#pragma warning restore SYSLIB0051

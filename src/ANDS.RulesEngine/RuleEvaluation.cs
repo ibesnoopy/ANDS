@@ -100,23 +100,33 @@ internal static class ConditionEvaluator
 
     private static bool Contains(object? actual, object? expected, RuleEvaluationOptions options)
     {
-        if (actual is string actualString && expected is string expectedString)
+        if (actual is string actualString)
+        {
+            if (expected is not string expectedString)
+                throw new InvalidOperationException("Contains requires a string expected value.");
             return actualString.Contains(expectedString,
                 options.StringCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+        }
         if (actual is IEnumerable enumerable && actual is not string)
             return enumerable.Cast<object?>().Any(item => AreEqual(item, expected, options));
         throw new InvalidOperationException("Contains requires a string or collection actual value and a compatible value.");
     }
 
-    private static bool StartsWith(object? actual, object? expected, RuleEvaluationOptions options) =>
-        actual is string actualString && expected is string expectedString &&
-        actualString.StartsWith(expectedString,
+    private static bool StartsWith(object? actual, object? expected, RuleEvaluationOptions options)
+    {
+        if (actual is not string actualString || expected is not string expectedString)
+            throw new InvalidOperationException("StartsWith requires string actual and expected values.");
+        return actualString.StartsWith(expectedString,
             options.StringCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+    }
 
-    private static bool EndsWith(object? actual, object? expected, RuleEvaluationOptions options) =>
-        actual is string actualString && expected is string expectedString &&
-        actualString.EndsWith(expectedString,
+    private static bool EndsWith(object? actual, object? expected, RuleEvaluationOptions options)
+    {
+        if (actual is not string actualString || expected is not string expectedString)
+            throw new InvalidOperationException("EndsWith requires string actual and expected values.");
+        return actualString.EndsWith(expectedString,
             options.StringCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool In(object? actual, object? expected, RuleEvaluationOptions options)
     {
