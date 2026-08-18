@@ -166,7 +166,7 @@ public static class SqlRuleMapper
         var jsonOptions = serializerOptions ?? RuleJsonSerializer.DefaultOptions;
         var id = ReadRequiredString(reader, options.IdColumn, "id");
         var name = ReadRequiredString(reader, options.NameColumn, "name");
-        var definition = ReadRequiredString(reader, options.DefinitionColumn,
+        var definition = ReadRequiredStringCore(reader, options.DefinitionColumn,
             $"Definition column '{options.DefinitionColumn}' is null or empty.", id);
 
         RuleDefinition ruleDefinition;
@@ -198,10 +198,14 @@ public static class SqlRuleMapper
 
     private static string ReadRequiredString(DbDataReader reader, string column, string label)
     {
-        return ReadRequiredString(reader, column, $"The {label} column '{column}' is null or empty.");
+        return ReadRequiredStringCore(reader, column, $"The {label} column '{column}' is null or empty.");
     }
 
-    private static string ReadRequiredString(DbDataReader reader, string column, string message, string? ruleId = null)
+    private static string ReadRequiredStringCore(
+        DbDataReader reader,
+        string column,
+        string message,
+        string? ruleId = null)
     {
         var value = ReadOptionalString(reader, column);
         if (string.IsNullOrWhiteSpace(value))
